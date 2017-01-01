@@ -106,7 +106,7 @@ app.post('/sendSMS', function(req, res, next) {
   axios.get(FEED_URL)
     .then(data => {
       let jobs = data.data.jobs;
-      fetchClients(jobs, 'sms').then(() => {
+      matchCandidates(jobs, 'sms').then(() => {
         res.sendStatus(200);
       })
       .catch((err) => {
@@ -123,7 +123,7 @@ app.post('/sendEmails', function(req, res, next) {
   axios.get(FEED_URL)
     .then(data => {
       let jobs = data.data.jobs;
-      fetchClients(jobs, 'email').then(() => {
+      matchCandidates(jobs, 'email').then(() => {
         res.sendStatus(200);
       })
       .catch((err) => {
@@ -242,7 +242,14 @@ const sendPlivoSMS = (number, message) => {
       'dst' : `+1${number}`,
       'text' : message
     };
-
+    // if (number === '7064834776') {
+    //   p.send_message(params, function (status, response) {
+    //     totalSMSSent++;
+    //     console.log("Here are the total SMS sent: ", totalSMSSent);
+    //     console.log('Status: ', status);
+    //     console.log('API Response:\n', response);
+    //   });
+    // }
     p.send_message(params, function (status, response) {
       totalSMSSent++;
       console.log("Here are the total SMS sent: ", totalSMSSent);
@@ -326,19 +333,19 @@ const createCandidates = () => {
   //   candidate.save();
   // }
 
-  // const candidate = new Candidate();
-  // // candidate.firstName = 'Marcus';
-  // candidate.lastName = 'Hurney';
-  // candidate.email = 'marcushurney@gmail.com';
-  // candidate.state = 'GA';
-  // // remove dashes from candidate's phone number before saving
-  // candidate.phone = '7064834776';
-  // candidate.save();
+  const candidate = new Candidate();
+  candidate.firstName = 'Marcus';
+  candidate.lastName = 'Hurney';
+  candidate.email = 'marcushurney@gmail.com';
+  candidate.state = 'GA';
+  // remove dashes from candidate's phone number before saving
+  candidate.phone = '7064834776';
+  candidate.save();
 
   // let candidate = new Candidate();
   // candidate.firstName = 'Kathy';
   // candidate.lastName = 'Nguyen';
-  // candidate.email = 'marcushurney@gmail.com';
+  // candidate.email = 'kathy@gmail.com';
   // candidate.state = 'MA';
   // // remove dashes from candidate's phone number before saving
   // candidate.phone = '4043940821';
@@ -371,10 +378,10 @@ const createCandidates = () => {
 
 
 const PUBLISHER_ID = '2595';
-const MAX_MESSAGE_LIMIT = 200;
+const MAX_MESSAGE_LIMIT = 50;
 let matchedCandidates = [];
 
-const fetchClients = (allJobs, typeOfReq) => {
+const matchCandidates = (allJobs, typeOfReq) => {
   return new Promise((resolve, reject) => {
     async.each(allJobs, function(job, callback) {
 
@@ -387,13 +394,11 @@ const fetchClients = (allJobs, typeOfReq) => {
 
           let candidatesWithJobs = candidates.filter(candidate => {
 
-            //make sure candidate has a number before adding
-            if (candidate.phone) {
+            //make sure candidate has a number or email before adding
+            if (candidate.phone || candidate.email) {
               // add the job to the candidate model
               candidate.jobs = [];
               candidate.jobs = [job];
-              // add sent property to job for tracking
-              // candidate.jobs[0].sent = 0;
               return true;
             } else {
               return false;
@@ -404,9 +409,16 @@ const fetchClients = (allJobs, typeOfReq) => {
           // check to see if candidate has been matched before
           candidatesWithJobs.forEach(candidateWithNewJob => {
             // check to see if candidateWithNewJob already exists in matchedCandidates
-            let existingCandidate = {};
-            // see if another candidate has been matched with the same phone number
-            existingCandidate = _.findWhere(matchedCandidates, { phone: candidateWithNewJob.phone });
+            let existingCandidate = undefined;
+
+            // check if the candidate in question has a phone number
+            if (candidateWithNewJob.phone) {
+              // check for existing candidate by phone num
+              existingCandidate = _.findWhere(matchedCandidates, { phone: candidateWithNewJob.phone });
+            } else if (candidateWithNewJob.email) {
+              // no phone number but has email address, so check for existing candidate by email
+              existingCandidate = _.findWhere(matchedCandidates, { email: candidateWithNewJob.email });
+            }
 
             //if the job does not contain uber or lyft and the price is high continue
             if (!containsUberLyft(job.title) &&
@@ -420,7 +432,7 @@ const fetchClients = (allJobs, typeOfReq) => {
                     // so add the new job to the candidate's existing jobs array
                     existingCandidate.jobs.push(candidateWithNewJob.jobs[0]);
                   } else {
-                    // the candidate is new so add him to matchedCandidates
+                    // the candidate is new so add him/her to matchedCandidates
                     matchedCandidates.push(candidateWithNewJob);
                   }
 
