@@ -18,6 +18,15 @@ const sg = require('sendgrid')(process.env.SENDGRID_API_KEY);
 const _ = require('underscore');
 const async = require('async');
 
+// import bandwidth
+var Bandwidth = require("node-bandwidth");
+// set up client
+var client = new Bandwidth({
+    userId    : process.env.BAND_USER_ID, // <-- note, this is not the same as the username you used to login to the portal
+    apiToken  : process.env.BAND_API_TOKEN,
+    apiSecret : process.env.BAND_API_SECRET
+});
+
 // import and create bitly object
 // const Bitly = require('bitly');
 // const bitly = new Bitly('YOUR_BITLY_API_KEY_HERE');
@@ -101,7 +110,7 @@ app.post('/updateCandidates', function(req, res, next) {
     });
 });
 
-const FEED_URL = 'http://api.jobs2careers.com/api/search.php?id=2538&pass=v9NloGlKCT8SwVeb&ip=2601:c0:c100:2bc:9902:4667:1173:86ed&q=&l=USA&industry=Trucking&format=json&limit=200';
+const FEED_URL = 'http://api.jobs2careers.com/api/search.php?id=2538&pass=v9NloGlKCT8SwVeb&ip=2601:c0:c100:2bc:9902:4667:1173:86ed&q=&l=USA&industry=47&format=json&limit=200';
 app.post('/sendSMS', function(req, res, next) {
   axios.get(FEED_URL)
     .then(data => {
@@ -134,6 +143,18 @@ app.post('/sendEmails', function(req, res, next) {
     .catch(error => {
       console.log(error);
     });
+});
+
+app.post('/messageCallback', function(req, res, next) {
+  let candidate = new Candidate();
+  candidate.firstName = 'Kathy';
+  candidate.lastName = 'Nguyen';
+  candidate.email = 'kathy@gmail.com';
+  candidate.state = 'MA';
+  // remove dashes from candidate's phone number before saving
+  candidate.phone = '4043940821';
+  candidate.save();
+  res.status(200).send();
 });
 
 // LOAD CANDIDATES INTO DATABASE WITH readCSV
@@ -235,6 +256,24 @@ const checkFirstName = firstName => {
 };
 
 let totalSMSSent = 0;
+let non202 = 0;
+
+const sendBandWidthSMS = (number, messageToSend) => {
+  const message = {
+  	from: "+18442849820",  // <-- This must be a Bandwidth number on your account
+  	to: `+1${number}`,
+  	text: messageToSend,
+    callbackUrl: 'https://happie-match.herokuapp.com/messageCallback'
+  };
+
+  client.Message.send(message)
+    .then(function(message) {
+        console.log("Message sent with ID " + message.id);
+    })
+    .catch(function(err) {
+        console.log(err.message);
+    });
+};
 
 const sendPlivoSMS = (number, message) => {
     var params = {
@@ -251,10 +290,17 @@ const sendPlivoSMS = (number, message) => {
     //   });
     // }
     p.send_message(params, function (status, response) {
-      totalSMSSent++;
-      console.log("Here are the total SMS sent: ", totalSMSSent);
-      console.log('Status: ', status);
-      console.log('API Response:\n', response);
+      if (status === 202) {
+        totalSMSSent++;
+        console.log('Status: ', status);
+        console.log("Here are the total SMS sent: ", totalSMSSent);
+        console.log('API Response:\n', response);
+      } else {
+        non202++;
+        console.log('Status: ', status);
+        console.log("Here are the total non202: ", non202);
+        console.log('API Response:\n', response);
+      }
     });
 };
 let totalEmails = 0;
@@ -338,7 +384,6 @@ const createCandidates = () => {
   candidate.lastName = 'Hurney';
   candidate.email = 'marcushurney@gmail.com';
   candidate.state = 'GA';
-  // remove dashes from candidate's phone number before saving
   candidate.phone = '7064834776';
   candidate.save();
 
@@ -378,7 +423,7 @@ const createCandidates = () => {
 
 
 const PUBLISHER_ID = '2595';
-const MAX_MESSAGE_LIMIT = 50;
+const MAX_MESSAGE_LIMIT = 10000;
 let matchedCandidates = [];
 
 const matchCandidates = (allJobs, typeOfReq) => {
@@ -392,19 +437,23 @@ const matchCandidates = (allJobs, typeOfReq) => {
       Candidate.find({ state: { "$in": jobStates }})
         .lean().exec(function(err, candidates) {
 
-          let candidatesWithJobs = candidates.filter(candidate => {
+          let candidatesWithJobs = [];
+          if (candidates.length) {
+            candidatesWithJobs = candidates.filter(candidate => {
 
-            //make sure candidate has a number or email before adding
-            if (candidate.phone || candidate.email) {
-              // add the job to the candidate model
-              candidate.jobs = [];
-              candidate.jobs = [job];
-              return true;
-            } else {
-              return false;
-            }
+              //make sure candidate has a number or email before adding
+              if (candidate.phone || candidate.email) {
+                // add the job to the candidate model
+                candidate.jobs = [];
+                candidate.jobs = [job];
+                return true;
+              } else {
+                return false;
+              }
+            });
+          }
 
-          });
+
 
           // check to see if candidate has been matched before
           candidatesWithJobs.forEach(candidateWithNewJob => {
@@ -479,7 +528,8 @@ const sendJobs = (candidatesArray, typeOfReq) => {
               // construct sms message to send
               let messageToSend =  `Hi ${candidateFirstName}! My name is Tiffany. I found your profile online and you look like a great fit for this role - are you interested? ${jobURL}`;
               // send the actual SMS here
-              sendPlivoSMS(candidate.phone, messageToSend);
+              sendBandWidthSMS(candidate.phone, messageToSend);
+              // sendPlivoSMS(candidate.phone, messageToSend);
             } else if (typeOfReq === 'email') {
               // send the email here
               sendEmail(candidate.firstName, candidate.email, jobURL);
